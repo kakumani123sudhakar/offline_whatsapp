@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoRa Web Terminal</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar / Settings -->
+        <aside class="sidebar glass-panel">
+            <h1 class="logo">
+                <span class="icon">📡</span>
+                <span>LoRa<br>Link</span>
+            </h1>
+            
+            <div class="connection-box">
+                <div class="status-indicator">
+                    <div id="statusDot" class="dot disconnected"></div>
+                    <span id="statusText">Disconnected</span>
+                </div>
+                <div class="input-group">
+                    <label for="baudRate">Baud Rate</label>
+                    <select id="baudRate">
+                        <option value="9600" selected>9600 (E5 Default)</option>
+                        <option value="115200">115200</option>
+                        <option value="9600">9600</option>
+                    </select>
+                </div>
+                <button id="connectBtn" class="btn primary-btn">Connect USB Device</button>
+                <button id="disconnectBtn" class="btn secondary-btn hidden">Disconnect</button>
+            </div>
+
+            <div class="quick-commands">
+                <h3>AT Commands</h3>
+                <button class="cmd-btn" data-cmd="AT">Ping (AT)</button>
+                <button class="cmd-btn" data-cmd="AT+VER">Version (AT+VER)</button>
+                <button class="cmd-btn" data-cmd="AT+MODE=TEST">P2P Mode (AT+MODE=TEST)</button>
+                <button class="cmd-btn" data-cmd="AT+TEST=RXLRPKT">Start Receive (AT+TEST=RXLRPKT)</button>
+            </div>
+        </aside>
+
+        <!-- Main Chat / Terminal Area -->
+        <main class="main-content">
+            <header class="topbar glass-panel">
+                <h2>Terminal Console</h2>
+                <button id="clearBtn" class="action-btn">Clear Log</button>
+            </header>
+
+            <div class="terminal-window glass-panel" id="terminalOutput">
+                <div class="message system">Welcome to LoRa Web Terminal. Please connect your STM32 LoRa-E5 module.</div>
+                <!-- Messages will appear here -->
+            </div>
+
+            <div class="input-area glass-panel">
+                <form id="messageForm">
+                    <input type="text" id="commandInput" placeholder="Enter AT command (e.g. AT+MSG=&quot;Hello&quot;)..." autocomplete="off">
+                    <button type="submit" class="send-btn">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
