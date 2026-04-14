@@ -1,75 +1,124 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LoRa Web Terminal</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>LoRa Messenger — Offline WhatsApp</title>
+  <meta name="description" content="Offline peer-to-peer messenger powered by LoRa radio and STM32 LoRa-E5 mini."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
-    <div class="app-container">
-        <!-- Sidebar / Settings -->
-        <aside class="sidebar glass-panel">
-            <h1 class="logo">
-                <span class="icon">📡</span>
-                <span>LoRa<br>Link</span>
-            </h1>
-            
-            <div class="connection-box">
-                <div class="status-indicator">
-                    <div id="statusDot" class="dot disconnected"></div>
-                    <span id="statusText">Disconnected</span>
-                </div>
-                <div class="input-group">
-                    <label for="baudRate">Baud Rate</label>
-                    <select id="baudRate">
-                        <option value="9600" selected>9600 (E5 Default)</option>
-                        <option value="115200">115200</option>
-                        <option value="9600">9600</option>
-                    </select>
-                </div>
-                <button id="connectBtn" class="btn primary-btn">Connect USB Device</button>
-                <button id="disconnectBtn" class="btn secondary-btn hidden">Disconnect</button>
-            </div>
 
-            <div class="quick-commands">
-                <h3>AT Commands</h3>
-                <button class="cmd-btn" data-cmd="AT">Ping (AT)</button>
-                <button class="cmd-btn" data-cmd="AT+VER">Version (AT+VER)</button>
-                <button class="cmd-btn" data-cmd="AT+MODE=TEST">P2P Mode (AT+MODE=TEST)</button>
-                <button class="cmd-btn" data-cmd="AT+TEST=RXLRPKT">Start Receive (AT+TEST=RXLRPKT)</button>
-            </div>
-        </aside>
+<div class="app">
 
-        <!-- Main Chat / Terminal Area -->
-        <main class="main-content">
-            <header class="topbar glass-panel">
-                <h2>Terminal Console</h2>
-                <button id="clearBtn" class="action-btn">Clear Log</button>
-            </header>
-
-            <div class="terminal-window glass-panel" id="terminalOutput">
-                <div class="message system">Welcome to LoRa Web Terminal. Please connect your STM32 LoRa-E5 module.</div>
-                <!-- Messages will appear here -->
-            </div>
-
-            <div class="input-area glass-panel">
-                <form id="messageForm">
-                    <input type="text" id="commandInput" placeholder="Enter AT command (e.g. AT+MSG=&quot;Hello&quot;)..." autocomplete="off">
-                    <button type="submit" class="send-btn">
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                        </svg>
-                    </button>
-                </form>
-            </div>
-        </main>
+  <!-- LEFT SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="app-logo">
+        <div class="logo-icon">📡</div>
+        <div>
+          <div class="logo-title">LoRa Messenger</div>
+          <div class="logo-sub">Offline · Encrypted · Free</div>
+        </div>
+      </div>
     </div>
 
-    <script src="app.js"></script>
+    <!-- Connection Panel -->
+    <div class="connection-panel">
+      <div class="status-row">
+        <div id="statusDot" class="status-dot disconnected"></div>
+        <span id="statusText">Not Connected</span>
+      </div>
+
+      <div class="field-group">
+        <label>Your Name</label>
+        <input type="text" id="myName" value="User A" placeholder="Your name..."/>
+      </div>
+
+      <div class="field-group">
+        <label>Baud Rate</label>
+        <select id="baudRate">
+          <option value="9600" selected>9600</option>
+          <option value="115200">115200</option>
+        </select>
+      </div>
+
+      <button id="connectBtn" class="btn btn-connect">
+        <span>🔌</span> Connect LoRa Board
+      </button>
+      <button id="disconnectBtn" class="btn btn-disconnect hidden">
+        <span>❌</span> Disconnect
+      </button>
+    </div>
+
+    <!-- Signal Info -->
+    <div class="signal-panel">
+      <div class="signal-title">📶 Signal Info</div>
+      <div class="signal-row"><span>Frequency</span><span>868 MHz</span></div>
+      <div class="signal-row"><span>Mode</span><span>LoRa P2P</span></div>
+      <div class="signal-row"><span>Last RSSI</span><span id="rssiVal">—</span></div>
+      <div class="signal-row"><span>Messages TX</span><span id="txCount">0</span></div>
+      <div class="signal-row"><span>Messages RX</span><span id="rxCount">0</span></div>
+    </div>
+
+    <!-- AT Debug -->
+    <div class="debug-panel">
+      <div class="signal-title">🔧 Raw Serial Debug</div>
+      <div id="debugLog" class="debug-log"></div>
+    </div>
+  </aside>
+
+  <!-- MAIN CHAT AREA -->
+  <main class="chat-main">
+
+    <!-- Top Bar -->
+    <header class="chat-topbar">
+      <div class="chat-contact">
+        <div class="contact-avatar">🌐</div>
+        <div>
+          <div class="contact-name">LoRa Network</div>
+          <div class="contact-status" id="contactStatus">Connect your board to start</div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="clearChatBtn" title="Clear chat">🗑️</button>
+      </div>
+    </header>
+
+    <!-- Chat messages -->
+    <div class="chat-messages" id="chatMessages">
+      <div class="welcome-msg">
+        <div class="welcome-icon">📡</div>
+        <h2>LoRa Messenger</h2>
+        <p>Connect your STM32 LoRa-E5 mini board via USB<br>to start sending offline messages.</p>
+        <p class="welcome-range">Range: up to <strong>10 km</strong> · No internet required</p>
+      </div>
+    </div>
+
+    <!-- Input Bar -->
+    <div class="chat-input-bar">
+      <form id="msgForm">
+        <input 
+          type="text" 
+          id="msgInput" 
+          placeholder="Type a message..." 
+          autocomplete="off"
+          disabled
+        />
+        <button type="submit" id="sendBtn" class="send-btn" disabled>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+
+  </main>
+</div>
+
+<script src="app.js"></script>
 </body>
 </html>
