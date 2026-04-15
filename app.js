@@ -241,31 +241,30 @@ async function sendMessage(text) {
   await writeSerial(payload);
 }
 
-// ─── Send a BMP image over LoRa (chunked) ─────────────────────
+// ─── Send a Base64 text file over LoRa (chunked) ──────────────
 async function sendImage(file) {
   if (!outputStream) return;
-  if (!file.name.toLowerCase().endsWith('.bmp')) {
-    addSysMsg('⚠️ Only BMP files are supported for LoRa image transfer.');
+  if (!file.name.toLowerCase().endsWith('.txt')) {
+    addSysMsg('⚠️ Please upload a .txt file containing the base64 image data.');
     return;
   }
 
-  addSysMsg('📷 Reading "' + file.name + '"...');
+  addSysMsg('📷 Reading base64 from "' + file.name + '"...');
 
-  const arrayBuf = await file.arrayBuffer();
-  const bytes    = new Uint8Array(arrayBuf);
-
-  // Convert raw bytes → base64 in one go
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+  const textData = await file.text();
+  
+  // Extract pure base64 if it has a data URI header
+  let fullB64 = textData.trim();
+  if (fullB64.includes('base64,')) {
+    fullB64 = fullB64.split('base64,')[1];
   }
-  const fullB64    = btoa(binary);
+
   const totalBytes = fullB64.length;
   const totalChunks = Math.ceil(totalBytes / IMG_CHUNK_RAW_BYTES);
 
   // Show preview locally
-  const localUrl = URL.createObjectURL(file);
-  addImageBubble('You', file.name, 'data:image/bmp;base64,' + fullB64, 'sent');
+  const dataUrlPreview = 'data:image/bmp;base64,' + fullB64;
+  addImageBubble('You', file.name, dataUrlPreview, 'sent');
 
   addSysMsg('📡 Transmitting "' + file.name + '" in ' + totalChunks + ' LoRa packets...');
 
@@ -303,8 +302,7 @@ async function sendImage(file) {
 
   // ── Send END ───────────────────────────────────────────────
   await writeSerial('IMG:END:' + file.name);
-  addSysMsg('✅ Image "' + file.name + '" sent in ' + totalChunks + ' packets!');
-  URL.revokeObjectURL(localUrl);
+  addSysMsg('✅ Base64 file "' + file.name + '" sent in ' + totalChunks + ' packets!');
 }
 
 // ─── Write one line to the serial port ───────────────────────
@@ -392,7 +390,14 @@ function addImageBubble(sender, filename, dataUrl, direction) {
 
   const downloadBtn = document.createElement('a');
   downloadBtn.href = dataUrl;
-  downloadBtn.download = filename;
+  
+  // Convert .txt extension to .bmp so windows knows it's an image
+  let dlName = filename;
+  if (dlName.toLowerCase().endsWith('.txt')) {
+    dlName = dlName.slice(0, -4) + '.bmp';
+  }
+  downloadBtn.download = dlName;
+  
   downloadBtn.className = 'download-btn';
   downloadBtn.textContent = '💾 Download Image';
 
