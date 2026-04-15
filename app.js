@@ -66,8 +66,9 @@ function closeLightbox() {
 // ─── Image Transfer Constants ─────────────────────────────────
 // LoRa max payload = 255 bytes
 // "IMG:DATA:filename:idx:" = ~20 bytes header
-// Remaining for base64 payload: ~200 chars → encodes ~150 bytes binary
-const IMG_CHUNK_RAW_BYTES = 150;
+// Remaining for base64 payload: ~200 chars
+// We MUST use a multiple of 4 for base64 chunks (e.g. 152) so missing chunks don't shift bytes
+const IMG_CHUNK_RAW_BYTES = 152;
 
 // ─── Browser Check ────────────────────────────────────────────
 if (!('serial' in navigator)) {
@@ -233,24 +234,27 @@ function handleRxPayload(payload) {
     const session = imgRxSessions[fname];
     if (!session) return;
 
-    // Fill missing chunks with empty strings to prevent undefined errors
+    let missing = 0;
+
+    // Fill missing chunks with 'A's (zeroes in base64) to prevent byte-shifting and corruption offsets
     for (let i = 0; i < session.total; i++) {
-       if (!session.chunks[i]) session.chunks[i] = '';
+       if (!session.chunks[i]) {
+          missing++;
+          // The last chunk might be smaller, but we blindly pad with IMG_CHUNK_RAW_BYTES 
+          // to try and align the rest of the file correctly.
+          session.chunks[i] = 'A'.repeat(IMG_CHUNK_RAW_BYTES);
+       }
     }
 
     let allB64 = session.chunks.join('');
 
-    // Fix base64 padding if the length is incorrect due to dropped packets
+    // Fix base64 padding to ensure atob doesn't completely throw
     while (allB64.length % 4 !== 0) {
       allB64 += '=';
     }
 
-    let missing = 0;
-    for (let i = 0; i < session.total; i++) {
-      if (!session.chunks[i]) missing++;
-    }
     if (missing > 0) {
-      addSysMsg('⚠️ Image "' + fname + '" has ' + missing + ' missing chunks. May be corrupted.');
+      addSysMsg('⚠️ Image "' + fname + '" has ' + missing + ' missing chunks. Some pixels may be broken.');
     }
 
     // Detect MIME type from base64 signature
