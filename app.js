@@ -195,6 +195,17 @@ function handleRxPayload(payload) {
     if (!session) return;
 
     const allB64 = session.chunks.join('');
+    
+    // Check if any chunks were lost over the radio
+    let missing = 0;
+    for (let i = 0; i < session.total; i++) {
+       if (!session.chunks[i]) missing++;
+    }
+    
+    if (missing > 0) {
+       addSysMsg('⚠️ Image "' + fname + '" has ' + missing + ' missing chunks. The file might be corrupted.');
+    }
+
     // Convert base64 string → data URL and display in chat
     const dataUrl = 'data:image/bmp;base64,' + allB64;
     addImageBubble('Remote', fname, dataUrl, 'received');
@@ -379,8 +390,15 @@ function addImageBubble(sender, filename, dataUrl, direction) {
   img.alt = filename;
   img.title = filename;
 
+  const downloadBtn = document.createElement('a');
+  downloadBtn.href = dataUrl;
+  downloadBtn.download = filename;
+  downloadBtn.className = 'download-btn';
+  downloadBtn.textContent = '💾 Download Image';
+
   bubble.appendChild(caption);
   bubble.appendChild(img);
+  bubble.appendChild(downloadBtn);
 
   const time = document.createElement('div');
   time.className = 'msg-time';
