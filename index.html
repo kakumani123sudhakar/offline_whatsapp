@@ -50,6 +50,44 @@
     .download-btn:hover {
       background: rgba(255, 255, 255, 0.2);
     }
+    /* ── Action Buttons ────────────────────────────── */
+    .del-btn {
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.4);
+      cursor: pointer;
+      font-size: 0.85rem;
+      margin-left: 8px;
+      padding: 0;
+    }
+    .del-btn:hover { color: #ff4d4d; }
+    
+    .cancel-panel {
+      position: absolute;
+      top: -45px;
+      left: 10px;
+      right: 10px;
+      background: rgba(20,20,20,0.9);
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 10px 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #fff;
+      font-size: 0.85rem;
+      z-index: 100;
+    }
+    .cancel-btn {
+      background: #ff4d4d;
+      border: none;
+      color: #fff;
+      border-radius: 4px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .cancel-btn:hover { background: #ff3333; }
   </style>
 </head>
 <body>
@@ -141,7 +179,13 @@
     </div>
 
     <!-- Input Bar -->
-    <div class="chat-input-bar">
+    <div class="chat-input-bar" style="position:relative;">
+      <!-- Cancel UI (hidden by default) -->
+      <div id="cancelPanel" class="cancel-panel" style="display:none;">
+        <span id="cancelText">Sending Image... 0%</span>
+        <button id="cancelTxBtn" class="cancel-btn">Cancel ❌</button>
+      </div>
+      
       <!-- Hidden file input for Image files -->
       <input type="file" id="imgFileInput" accept="image/*" style="display:none">
       <form id="msgForm">

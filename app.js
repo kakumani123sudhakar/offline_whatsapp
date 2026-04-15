@@ -14,6 +14,9 @@ let rxCount = 0;
 
 let chatHistory = JSON.parse(localStorage.getItem('lora_chat_history') || '[]');
 
+let cancelImgTx = false;
+function mkId() { return Math.random().toString(36).substr(2,6); }
+
 // Resolve function for TX coordination during images
 let resolveTxAwait = null;
 
@@ -161,14 +164,28 @@ function handleIncoming(line) {
 
 // ─── Handle an RX payload (text OR image protocol) ────────────
 function handleRxPayload(payload) {
+  // ── Command Protocol ──────────────────────────────────────────
+  if (payload.startsWith('CMD:DEL:')) {
+    const delId = payload.split(':')[2];
+    deleteMessageById(delId);
+    return;
+  }
+
   // ── Image protocol ──────────────────────────────────────────
+  if (payload.startsWith('IMG:CANCEL:')) {
+    const fname = payload.slice('IMG:CANCEL:'.length);
+    delete imgRxSessions[fname];
+    addSysMsg('🚫 Image transfer "' + fname + '" was cancelled by sender.');
+    return;
+  }
+
   if (payload.startsWith('IMG:START:')) {
-    // IMG:START:<filename>:<totalChunks>
+    // IMG:START:<filename>:<totalChunks>:<msgId>
     const parts  = payload.split(':');
-    // parts[0]=IMG  parts[1]=START  parts[2]=filename  parts[3]=totalChunks
     const fname  = parts[2] || 'image.bmp';
     const total  = parseInt(parts[3], 10);
-    imgRxSessions[fname] = { total, chunks: [] };
+    const msgId  = parts[4] || mkId(); // optional msgId
+    imgRxSessions[fname] = { total, chunks: [], msgId };
     addSysMsg('📷 Receiving image "' + fname + '" (' + total + ' chunks)...');
     return;
   }
@@ -183,7 +200,7 @@ function handleRxPayload(payload) {
     const b64data = rest.slice(colon2 + 1);
 
     if (!imgRxSessions[fname]) {
-      imgRxSessions[fname] = { total: null, chunks: [] };
+      imgRxSessions[fname] = { total: null, chunks: [], msgId: mkId() };
     }
     imgRxSessions[fname].chunks[idx] = b64data;
     addDebug('  IMG chunk ' + idx + ' received (' + b64data.length + ' chars)');
@@ -218,12 +235,23 @@ function handleRxPayload(payload) {
 
     // Convert base64 string → data URL and display in chat
     const dataUrl = 'data:' + mimeType + ';base64,' + allB64;
-    addImageBubble('Remote', fname, dataUrl, allB64, 'received');
+    addImageBubble('Remote', fname, dataUrl, allB64, 'received', null, false, session.msgId);
     delete imgRxSessions[fname];
     return;
   }
 
   // ── Regular text message ────────────────────────────────────
+  if (payload.startsWith('MSG:')) {
+    // MSG:id:sender:text
+    const parts = payload.split(':');
+    const msgId = parts[1];
+    const sender = parts[2];
+    const text = parts.slice(3).join(':').trim();
+    addBubble(sender, text, 'received', null, false, msgId);
+    return;
+  }
+
+  // Legacy fallback text message processing
   const colonIdx = payload.indexOf(':');
   let sender = 'Remote';
   let text   = payload;
@@ -231,7 +259,7 @@ function handleRxPayload(payload) {
     sender = payload.slice(0, colonIdx).trim();
     text   = payload.slice(colonIdx + 1).trim();
   }
-  addBubble(sender, text, 'received');
+  addBubble(sender, text, 'received', null, false, mkId());
 }
 
 // ─── Send a text message ──────────────────────────────────────
@@ -239,15 +267,16 @@ async function sendMessage(text) {
   if (!outputStream || !text.trim()) return;
 
   const name    = myNameInput.value.trim() || 'Me';
-  const payload = name + ': ' + text.trim();
+  const msgId   = mkId();
+  const payload = `MSG:${msgId}:${name}:${text.trim()}`;
 
-  // Hard guard: LoRa packet limit (NETWORK_ID 20b + payload ≤ 255)
+  // Hard guard: LoRa packet limit
   if (payload.length > 234) {
-    addSysMsg('⚠️ Message too long! Max ~220 characters.');
+    addSysMsg('⚠️ Message too long! Max ~200 characters.');
     return;
   }
 
-  addBubble('You', text.trim(), 'sent');
+  addBubble('You', text.trim(), 'sent', null, false, msgId);
   await writeSerial(payload);
 }
 
@@ -282,23 +311,45 @@ async function sendImage(file) {
   else if (fullB64.startsWith('UklGR')) prevMime = 'image/webp';
   else if (fullB64.startsWith('Qk')) prevMime = 'image/bmp';
 
+  // Generate ID
+  const msgId = mkId();
+
   // Show preview locally
   const dataUrlPreview = 'data:' + prevMime + ';base64,' + fullB64;
-  addImageBubble('You', file.name, dataUrlPreview, fullB64, 'sent');
+  addImageBubble('You', file.name, dataUrlPreview, fullB64, 'sent', null, false, msgId);
 
-  addSysMsg('📡 Transmitting "' + file.name + '" in ' + totalChunks + ' LoRa packets...');
+  // Setup TX Cancel UI
+  const cancelPanel = document.getElementById('cancelPanel');
+  const cancelText = document.getElementById('cancelText');
+  const cancelBtn = document.getElementById('cancelTxBtn');
+  
+  cancelImgTx = false;
+  cancelBtn.onclick = () => { cancelImgTx = true; };
+  cancelPanel.style.display = 'flex';
+
+  addSysMsg('📡 Transmitting "' + file.name + '" in ' + totalChunks + ' packets...');
 
   // ── Send START ─────────────────────────────────────────────
-  await writeSerial('IMG:START:' + file.name + ':' + totalChunks);
+  await writeSerial('IMG:START:' + file.name + ':' + totalChunks + ':' + msgId);
   await delay(200);
 
   // ── Send DATA chunks ───────────────────────────────────────
   for (let i = 0; i < totalChunks; i++) {
+    if (cancelImgTx) {
+      await writeSerial('IMG:CANCEL:' + file.name);
+      addSysMsg('🚫 Image transfer cancelled.');
+      cancelPanel.style.display = 'none';
+      return;
+    }
+    
+    cancelText.textContent = `Sending... ${Math.round((i/totalChunks)*100)}%`;
+
     const chunk = fullB64.slice(i * IMG_CHUNK_RAW_BYTES, (i + 1) * IMG_CHUNK_RAW_BYTES);
     const pkt   = 'IMG:DATA:' + file.name + ':' + i + ':' + chunk;
 
     if (pkt.length > 234) {
       addSysMsg('❌ Chunk ' + i + ' too long (' + pkt.length + ' bytes). Aborting.');
+      cancelPanel.style.display = 'none';
       return;
     }
 
@@ -311,7 +362,6 @@ async function sendImage(file) {
     addDebug('→ IMG chunk ' + i + '/' + (totalChunks - 1) + ' sent (' + chunk.length + ' chars)');
 
     // Smart logic: Wait for the board to say TX_OK: before sending the next one!
-    // (We also add a 3 second timeout just in case it crashes)
     await Promise.race([
       txWaitPromise,
       delay(3000)
@@ -320,9 +370,11 @@ async function sendImage(file) {
     resolveTxAwait = null;
   }
 
+  cancelPanel.style.display = 'none';
+
   // ── Send END ───────────────────────────────────────────────
   await writeSerial('IMG:END:' + file.name);
-  addSysMsg('✅ Base64 file "' + file.name + '" sent in ' + totalChunks + ' packets!');
+  addSysMsg('✅ Image "' + file.name + '" sent in ' + totalChunks + ' packets!');
 }
 
 // ─── Write one line to the serial port ───────────────────────
@@ -360,15 +412,27 @@ function removeWelcome() {
   if (w) w.remove();
 }
 
-function addBubble(sender, text, direction, msgTime = null, noSave = false) {
+function addBubble(sender, text, direction, msgTime = null, noSave = false, msgId = null) {
   removeWelcome();
+  if (!msgId) msgId = mkId();
 
   const wrapper = document.createElement('div');
   wrapper.className = 'msg-wrapper ' + direction;
+  wrapper.dataset.id = msgId;
 
   const senderEl = document.createElement('div');
   senderEl.className = 'msg-sender';
   senderEl.textContent = sender;
+  
+  const delBtn = document.createElement('button');
+  delBtn.className = 'del-btn';
+  delBtn.textContent = '🗑️';
+  delBtn.title = direction === 'sent' ? 'Delete for everyone' : 'Delete for me';
+  delBtn.onclick = async () => {
+     deleteMessageById(msgId);
+     if (direction === 'sent') await writeSerial('CMD:DEL:' + msgId);
+  };
+  senderEl.appendChild(delBtn);
 
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
@@ -385,19 +449,31 @@ function addBubble(sender, text, direction, msgTime = null, noSave = false) {
   scrollBottom();
   
   if (!noSave) {
-    saveChatHistory({ type: 'text', sender, text, direction, time: time.textContent });
+    saveChatHistory({ id: msgId, type: 'text', sender, text, direction, time: time.textContent });
   }
 }
 
-function addImageBubble(sender, filename, dataUrl, rawB64, direction, msgTime = null, noSave = false) {
+function addImageBubble(sender, filename, dataUrl, rawB64, direction, msgTime = null, noSave = false, msgId = null) {
   removeWelcome();
+  if (!msgId) msgId = mkId();
 
   const wrapper = document.createElement('div');
   wrapper.className = 'msg-wrapper ' + direction;
+  wrapper.dataset.id = msgId;
 
   const senderEl = document.createElement('div');
   senderEl.className = 'msg-sender';
   senderEl.textContent = sender;
+
+  const delBtn = document.createElement('button');
+  delBtn.className = 'del-btn';
+  delBtn.textContent = '🗑️';
+  delBtn.title = direction === 'sent' ? 'Delete for everyone' : 'Delete for me';
+  delBtn.onclick = async () => {
+     deleteMessageById(msgId);
+     if (direction === 'sent') await writeSerial('CMD:DEL:' + msgId);
+  };
+  senderEl.appendChild(delBtn);
 
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble img-bubble';
@@ -445,8 +521,15 @@ function addImageBubble(sender, filename, dataUrl, rawB64, direction, msgTime = 
   scrollBottom();
   
   if (!noSave) {
-    saveChatHistory({ type: 'image', sender, filename, dataUrl, rawBase64: rawB64, direction, time: time.textContent });
+    saveChatHistory({ id: msgId, type: 'image', sender, filename, dataUrl, rawBase64: rawB64, direction, time: time.textContent });
   }
+}
+
+function deleteMessageById(msgId) {
+  const el = chatMessages.querySelector(`.msg-wrapper[data-id="${msgId}"]`);
+  if (el) el.remove();
+  chatHistory = chatHistory.filter(m => m.id !== msgId);
+  localStorage.setItem('lora_chat_history', JSON.stringify(chatHistory));
 }
 
 function addSysMsg(text) {
@@ -494,9 +577,9 @@ function saveChatHistory(msg) {
 function loadChatHistory() {
   chatHistory.forEach(msg => {
     if (msg.type === 'text') {
-      addBubble(msg.sender, msg.text, msg.direction, msg.time, true);
+      addBubble(msg.sender, msg.text, msg.direction, msg.time, true, msg.id);
     } else if (msg.type === 'image') {
-      addImageBubble(msg.sender, msg.filename, msg.dataUrl, msg.rawBase64, msg.direction, msg.time, true);
+      addImageBubble(msg.sender, msg.filename, msg.dataUrl, msg.rawBase64, msg.direction, msg.time, true, msg.id);
     }
   });
 }
