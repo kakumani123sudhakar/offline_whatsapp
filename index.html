@@ -9,86 +9,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css"/>
-  <style>
-    /* ── Image bubbles ─────────────────────────────── */
-    .img-bubble { padding: 8px 10px; }
-    .img-caption { font-size: 0.72rem; opacity: .7; margin-bottom: 6px; }
-    .chat-img {
-      display: block;
-      max-width: 220px;
-      max-height: 220px;
-      border-radius: 8px;
-      cursor: pointer;
-      object-fit: contain;
-      background: #000;
-    }
-    /* ── Image button ──────────────────────────────── */
-    #imgBtn {
-      background: none;
-      border: none;
-      font-size: 1.35rem;
-      cursor: pointer;
-      padding: 0 6px;
-      opacity: .75;
-      transition: opacity .2s;
-      flex-shrink: 0;
-    }
-    #imgBtn:hover:not(:disabled) { opacity: 1; }
-    #imgBtn:disabled { opacity: .3; cursor: default; }
-    /* ── Download Button ───────────────────────────── */
-    .download-btn {
-      display: inline-block;
-      margin-top: 8px;
-      padding: 4px 10px;
-      background: rgba(255, 255, 255, 0.1);
-      color: inherit;
-      text-decoration: none;
-      border-radius: 4px;
-      font-size: 0.75rem;
-      transition: background 0.2s;
-    }
-    .download-btn:hover {
-      background: rgba(255, 255, 255, 0.2);
-    }
-    /* ── Action Buttons ────────────────────────────── */
-    .del-btn {
-      background: none;
-      border: none;
-      color: rgba(255,255,255,0.4);
-      cursor: pointer;
-      font-size: 0.85rem;
-      margin-left: 8px;
-      padding: 0;
-    }
-    .del-btn:hover { color: #ff4d4d; }
-    
-    .cancel-panel {
-      position: absolute;
-      top: -45px;
-      left: 10px;
-      right: 10px;
-      background: rgba(20,20,20,0.9);
-      border: 1px solid #333;
-      border-radius: 8px;
-      padding: 10px 15px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      color: #fff;
-      font-size: 0.85rem;
-      z-index: 100;
-    }
-    .cancel-btn {
-      background: #ff4d4d;
-      border: none;
-      color: #fff;
-      border-radius: 4px;
-      padding: 4px 8px;
-      cursor: pointer;
-      font-size: 0.8rem;
-    }
-    .cancel-btn:hover { background: #ff3333; }
-  </style>
 </head>
 <body>
 
@@ -185,16 +105,21 @@
         <span id="cancelText">Sending Image... 0%</span>
         <button id="cancelTxBtn" class="cancel-btn">Cancel ❌</button>
       </div>
-      
-      <!-- Hidden file input for Image files -->
+
+      <!-- Hidden file input -->
       <input type="file" id="imgFileInput" accept="image/*" style="display:none">
+
       <form id="msgForm">
         <!-- 📷 Image upload button -->
-        <button type="button" id="imgBtn" title="Upload an Image" disabled>📷</button>
-        <input 
-          type="text" 
-          id="msgInput" 
-          placeholder="Type a message... (max ~220 chars)" 
+        <button type="button" id="imgBtn" title="Send Image" disabled>
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/>
+          </svg>
+        </button>
+        <input
+          type="text"
+          id="msgInput"
+          placeholder="Type a message..."
           autocomplete="off"
           disabled
         />
@@ -207,6 +132,26 @@
     </div>
 
   </main>
+</div>
+
+<!-- ─── Image Lightbox ──────────────────────────────────────── -->
+<div id="imgLightbox" class="img-lightbox">
+  <div class="lightbox-header">
+    <button id="lightboxClose" class="lightbox-close" title="Close">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+      </svg>
+    </button>
+    <a id="lightboxDl" class="lightbox-dl" download title="Download image">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+        <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+      </svg>
+      Download
+    </a>
+  </div>
+  <div class="lightbox-body">
+    <img id="lightboxImg" src="" alt="Full image"/>
+  </div>
 </div>
 
 <script src="app.js"></script>

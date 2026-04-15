@@ -360,7 +360,7 @@ body {
   font-size: 0.85rem !important;
 }
 
-/* Message Bubbles */
+/* ─── Message Bubbles ─── */
 .msg-wrapper {
   display: flex;
   flex-direction: column;
@@ -368,15 +368,8 @@ body {
   animation: fadeIn 0.25s ease;
 }
 
-.msg-wrapper.sent {
-  align-self: flex-end;
-  align-items: flex-end;
-}
-
-.msg-wrapper.received {
-  align-self: flex-start;
-  align-items: flex-start;
-}
+.msg-wrapper.sent     { align-self: flex-end;   align-items: flex-end; }
+.msg-wrapper.received { align-self: flex-start;  align-items: flex-start; }
 
 .msg-sender {
   font-size: 0.7rem;
@@ -384,11 +377,12 @@ body {
   margin-bottom: 3px;
   padding: 0 8px;
   color: var(--blue);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.msg-wrapper.sent .msg-sender {
-  color: var(--accent);
-}
+.msg-wrapper.sent .msg-sender { color: var(--accent); }
 
 .msg-bubble {
   padding: 10px 14px;
@@ -416,9 +410,20 @@ body {
   padding: 0 6px;
 }
 
-.msg-wrapper.sent .msg-time {
-  text-align: right;
+.msg-wrapper.sent .msg-time { text-align: right; }
+
+/* Delete button */
+.del-btn {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.3);
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0;
+  transition: color 0.2s;
+  flex-shrink: 0;
 }
+.del-btn:hover { color: #ff4d4d; }
 
 /* System messages */
 .sys-msg {
@@ -432,7 +437,7 @@ body {
   animation: fadeIn 0.3s ease;
 }
 
-/* Input Bar */
+/* ─── Input Bar ─── */
 .chat-input-bar {
   padding: 14px 20px;
   background: var(--sidebar-bg);
@@ -444,6 +449,26 @@ body {
   gap: 12px;
   align-items: center;
 }
+
+/* Image Upload Button */
+#imgBtn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+#imgBtn:hover:not(:disabled) {
+  color: var(--accent);
+  background: rgba(37,211,102,0.1);
+}
+#imgBtn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 #msgInput {
   flex: 1;
@@ -463,10 +488,7 @@ body {
   box-shadow: 0 0 0 3px rgba(37,211,102,0.1);
 }
 
-#msgInput:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
+#msgInput:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .send-btn {
   width: 48px;
@@ -489,11 +511,285 @@ body {
   box-shadow: 0 4px 15px var(--accent-glow);
 }
 
-.send-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+.send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ─── Cancel Panel ─── */
+.cancel-panel {
+  position: absolute;
+  top: -50px;
+  left: 20px;
+  right: 20px;
+  background: rgba(15,20,28,0.96);
+  border: 1px solid rgba(37,211,102,0.25);
+  border-radius: 10px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text);
+  font-size: 0.85rem;
+  backdrop-filter: blur(8px);
 }
 
+.cancel-btn {
+  background: var(--red);
+  border: none;
+  color: #fff;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: background 0.2s;
+}
+.cancel-btn:hover { background: #e53e3e; }
+
+/* ════════════════════════════════════════════════════════════════
+   WhatsApp-style Image Bubble
+   ════════════════════════════════════════════════════════════════ */
+
+/* Image bubble wrapper */
+.img-bubble {
+  padding: 4px !important;
+  overflow: hidden;
+  min-width: 200px;
+  max-width: 300px;
+}
+
+/* Image container — holds the photo + spinner overlay */
+.wa-img-container {
+  position: relative;
+  width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0a0e14;
+  cursor: pointer;
+  line-height: 0;
+}
+
+/* The actual image */
+.wa-chat-img {
+  width: 100%;
+  max-width: 292px;
+  max-height: 280px;
+  object-fit: cover;
+  display: block;
+  border-radius: 8px;
+  transition: filter 0.2s;
+}
+
+.wa-img-container:hover .wa-chat-img {
+  filter: brightness(0.85);
+}
+
+/* Eye / expand icon on hover */
+.wa-img-container::after {
+  content: '🔍';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  font-size: 1.8rem;
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
+  pointer-events: none;
+}
+.wa-img-container:hover::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+/* Loading spinner overlay */
+.wa-img-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10,14,20,0.6);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.spinner-ring {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255,255,255,0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Footer row: file info + download */
+.wa-img-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px 5px;
+  gap: 8px;
+}
+
+.wa-img-fileinfo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+  flex: 1;
+}
+
+.wa-file-icon {
+  font-size: 0.85rem;
+  margin-right: 4px;
+}
+
+.wa-file-name {
+  font-size: 0.77rem;
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.wa-file-size {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-left: 20px;
+}
+
+/* Download button — icon only circle */
+.wa-download-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  color: var(--text);
+  text-decoration: none;
+  transition: background 0.2s, transform 0.15s;
+  flex-shrink: 0;
+}
+.wa-download-btn:hover {
+  background: var(--accent);
+  color: #000;
+  transform: scale(1.1);
+}
+
+/* Time row at bottom-right of bubble */
+.wa-img-time-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 2px 10px 6px;
+}
+
+/* WhatsApp double-tick (blue read receipt) */
+.wa-tick {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Image Lightbox (full-screen viewer)
+   ════════════════════════════════════════════════════════════════ */
+
+.img-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.93);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+  backdrop-filter: blur(4px);
+}
+
+.img-lightbox.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.lightbox-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+}
+
+.lightbox-close {
+  background: rgba(255,255,255,0.1);
+  border: none;
+  color: #fff;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.lightbox-close:hover { background: rgba(255,255,255,0.25); }
+
+.lightbox-dl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  text-decoration: none;
+  background: var(--accent);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 0.2s, transform 0.15s;
+}
+.lightbox-dl:hover {
+  background: var(--accent-dark);
+  transform: scale(1.04);
+}
+
+.lightbox-body {
+  max-width: 90vw;
+  max-height: 82vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#lightboxImg {
+  max-width: 90vw;
+  max-height: 82vh;
+  object-fit: contain;
+  border-radius: 10px;
+  box-shadow: 0 8px 60px rgba(0,0,0,0.8);
+  animation: zoomIn 0.25s ease;
+}
+
+@keyframes zoomIn {
+  from { transform: scale(0.9); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+/* ─── Animations ─── */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }

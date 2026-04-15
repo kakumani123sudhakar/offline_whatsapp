@@ -1,9 +1,6 @@
 // ============================================================
 //  LoRa Messenger – Web App (app.js)
-//  Fixes:
-//   • Baud-rate default raised to 115200 (matches firmware fix)
-//   • Chunked BMP image transfer  (IMG: protocol)
-//   • Image reassembly on receive with in-chat display
+//  WhatsApp-style image send & receive
 // ============================================================
 
 // ─── State ───────────────────────────────────────────────────
@@ -15,7 +12,7 @@ let rxCount = 0;
 let chatHistory = JSON.parse(localStorage.getItem('lora_chat_history') || '[]');
 
 let cancelImgTx = false;
-function mkId() { return Math.random().toString(36).substr(2,6); }
+function mkId() { return Math.random().toString(36).substr(2, 6); }
 
 // Resolve function for TX coordination during images
 let resolveTxAwait = null;
@@ -43,12 +40,34 @@ const rxCountEl      = document.getElementById('rxCount');
 const imgBtn         = document.getElementById('imgBtn');
 const imgFileInput   = document.getElementById('imgFileInput');
 
+// ─── Image Lightbox ───────────────────────────────────────────
+const lightbox       = document.getElementById('imgLightbox');
+const lightboxImg    = document.getElementById('lightboxImg');
+const lightboxClose  = document.getElementById('lightboxClose');
+const lightboxDl     = document.getElementById('lightboxDl');
+
+lightboxClose && lightboxClose.addEventListener('click', closeLightbox);
+lightbox && lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
+
+function openLightbox(src, filename) {
+  lightboxImg.src = src;
+  lightboxDl.href = src;
+  lightboxDl.download = filename || 'image';
+  lightbox.classList.add('active');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeLightbox() {
+  lightbox.classList.remove('active');
+  lightboxImg.src = '';
+  document.body.style.overflow = '';
+}
+
 // ─── Image Transfer Constants ─────────────────────────────────
 // LoRa max payload = 255 bytes
-// NETWORK_ID = 20 bytes  → 235 bytes free per packet
-// "IMG:DATA:0000:" = 14 bytes header
-// Remaining for base64 payload: 220 chars → encodes ~165 bytes binary
-const IMG_CHUNK_RAW_BYTES = 150;   // conservative – gives 200 base64 chars
+// "IMG:DATA:filename:idx:" = ~20 bytes header
+// Remaining for base64 payload: ~200 chars → encodes ~150 bytes binary
+const IMG_CHUNK_RAW_BYTES = 150;
 
 // ─── Browser Check ────────────────────────────────────────────
 if (!('serial' in navigator)) {
@@ -144,7 +163,6 @@ function handleIncoming(line) {
   } else if (line.startsWith('TX_OK:')) {
     txCount++;
     txCountEl.textContent = txCount;
-    // Signals the image sender that the board finished transmitting
     if (resolveTxAwait) {
       resolveTxAwait();
       resolveTxAwait = null;
@@ -171,7 +189,7 @@ function handleRxPayload(payload) {
     return;
   }
 
-  // ── Image protocol ──────────────────────────────────────────
+  // ── Image Cancel ─────────────────────────────────────────────
   if (payload.startsWith('IMG:CANCEL:')) {
     const fname = payload.slice('IMG:CANCEL:'.length);
     delete imgRxSessions[fname];
@@ -179,17 +197,19 @@ function handleRxPayload(payload) {
     return;
   }
 
+  // ── Image Start ──────────────────────────────────────────────
   if (payload.startsWith('IMG:START:')) {
     // IMG:START:<filename>:<totalChunks>:<msgId>
     const parts  = payload.split(':');
     const fname  = parts[2] || 'image.bmp';
     const total  = parseInt(parts[3], 10);
-    const msgId  = parts[4] || mkId(); // optional msgId
+    const msgId  = parts[4] || mkId();
     imgRxSessions[fname] = { total, chunks: [], msgId };
     addSysMsg('📷 Receiving image "' + fname + '" (' + total + ' chunks)...');
     return;
   }
 
+  // ── Image Data ───────────────────────────────────────────────
   if (payload.startsWith('IMG:DATA:')) {
     // IMG:DATA:<filename>:<chunkIdx>:<base64data>
     const rest    = payload.slice('IMG:DATA:'.length);
@@ -207,35 +227,29 @@ function handleRxPayload(payload) {
     return;
   }
 
+  // ── Image End ────────────────────────────────────────────────
   if (payload.startsWith('IMG:END:')) {
-    // IMG:END:<filename>
     const fname   = payload.slice('IMG:END:'.length);
     const session = imgRxSessions[fname];
     if (!session) return;
 
     const allB64 = session.chunks.join('');
-    
-    // Check if any chunks were lost over the radio
+
     let missing = 0;
     for (let i = 0; i < session.total; i++) {
-       if (!session.chunks[i]) missing++;
+      if (!session.chunks[i]) missing++;
     }
-    
     if (missing > 0) {
-       addSysMsg('⚠️ Image "' + fname + '" has ' + missing + ' missing chunks. The file might be corrupted.');
+      addSysMsg('⚠️ Image "' + fname + '" has ' + missing + ' missing chunks. May be corrupted.');
     }
 
-    // Auto-detect image type from base64 signature
-    let mimeType = 'image/bmp';
-    if (allB64.startsWith('/9j/')) mimeType = 'image/jpeg';
-    else if (allB64.startsWith('iVBORw')) mimeType = 'image/png';
-    else if (allB64.startsWith('R0lGOD')) mimeType = 'image/gif';
-    else if (allB64.startsWith('UklGR')) mimeType = 'image/webp';
-    else if (allB64.startsWith('Qk')) mimeType = 'image/bmp';
+    // Detect MIME type from base64 signature
+    const mimeType = detectMime(allB64);
 
-    // Convert base64 string → data URL and display in chat
-    const dataUrl = 'data:' + mimeType + ';base64,' + allB64;
-    addImageBubble('Remote', fname, dataUrl, allB64, 'received', null, false, session.msgId);
+    // Convert base64 → Blob → Object URL (like how WhatsApp handles it natively)
+    const blobUrl = base64ToBlobUrl(allB64, mimeType);
+
+    addImageBubble('Remote', fname, blobUrl, allB64, mimeType, 'received', null, false, session.msgId);
     delete imgRxSessions[fname];
     return;
   }
@@ -251,7 +265,7 @@ function handleRxPayload(payload) {
     return;
   }
 
-  // Legacy fallback text message processing
+  // Legacy fallback
   const colonIdx = payload.indexOf(':');
   let sender = 'Remote';
   let text   = payload;
@@ -270,7 +284,6 @@ async function sendMessage(text) {
   const msgId   = mkId();
   const payload = `MSG:${msgId}:${name}:${text.trim()}`;
 
-  // Hard guard: LoRa packet limit
   if (payload.length > 234) {
     addSysMsg('⚠️ Message too long! Max ~200 characters.');
     return;
@@ -280,7 +293,7 @@ async function sendMessage(text) {
   await writeSerial(payload);
 }
 
-// ─── Send an Image file over LoRa (chunked) ──────────────
+// ─── Send an Image file over LoRa (chunked) ───────────────────
 async function sendImage(file) {
   if (!outputStream) return;
   if (!file.type.startsWith('image/')) {
@@ -291,38 +304,31 @@ async function sendImage(file) {
   addSysMsg('📷 Reading image "' + file.name + '"...');
 
   const arrayBuf = await file.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuf);
-  
-  // Convert raw bytes → base64 in one go
+  const bytes    = new Uint8Array(arrayBuf);
+
+  // Convert raw bytes → base64
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);
   }
   const fullB64 = btoa(binary);
 
-  const totalBytes = fullB64.length;
+  const totalBytes  = fullB64.length;
   const totalChunks = Math.ceil(totalBytes / IMG_CHUNK_RAW_BYTES);
+  const mimeType    = file.type || detectMime(fullB64);
 
-  // Auto-detect image type from base64 signature to show local preview perfectly
-  let prevMime = 'image/bmp';
-  if (fullB64.startsWith('/9j/')) prevMime = 'image/jpeg';
-  else if (fullB64.startsWith('iVBORw')) prevMime = 'image/png';
-  else if (fullB64.startsWith('R0lGOD')) prevMime = 'image/gif';
-  else if (fullB64.startsWith('UklGR')) prevMime = 'image/webp';
-  else if (fullB64.startsWith('Qk')) prevMime = 'image/bmp';
-
-  // Generate ID
+  // Use Object URL for local preview — fast, no base64 data URI
+  const localBlobUrl = URL.createObjectURL(file);
   const msgId = mkId();
 
-  // Show preview locally
-  const dataUrlPreview = 'data:' + prevMime + ';base64,' + fullB64;
-  addImageBubble('You', file.name, dataUrlPreview, fullB64, 'sent', null, false, msgId);
+  // Show sent bubble with local preview immediately
+  addImageBubble('You', file.name, localBlobUrl, fullB64, mimeType, 'sent', null, false, msgId);
 
   // Setup TX Cancel UI
   const cancelPanel = document.getElementById('cancelPanel');
-  const cancelText = document.getElementById('cancelText');
-  const cancelBtn = document.getElementById('cancelTxBtn');
-  
+  const cancelText  = document.getElementById('cancelText');
+  const cancelBtn   = document.getElementById('cancelTxBtn');
+
   cancelImgTx = false;
   cancelBtn.onclick = () => { cancelImgTx = true; };
   cancelPanel.style.display = 'flex';
@@ -341,8 +347,8 @@ async function sendImage(file) {
       cancelPanel.style.display = 'none';
       return;
     }
-    
-    cancelText.textContent = `Sending... ${Math.round((i/totalChunks)*100)}%`;
+
+    cancelText.textContent = `Sending... ${Math.round((i / totalChunks) * 100)}%`;
 
     const chunk = fullB64.slice(i * IMG_CHUNK_RAW_BYTES, (i + 1) * IMG_CHUNK_RAW_BYTES);
     const pkt   = 'IMG:DATA:' + file.name + ':' + i + ':' + chunk;
@@ -353,20 +359,11 @@ async function sendImage(file) {
       return;
     }
 
-    // Set up a promise to wait for the exact moment the board finishes LoRa TX
-    let txWaitPromise = new Promise((resolve) => {
-      resolveTxAwait = resolve;
-    });
-
+    let txWaitPromise = new Promise((resolve) => { resolveTxAwait = resolve; });
     await writeSerial(pkt);
     addDebug('→ IMG chunk ' + i + '/' + (totalChunks - 1) + ' sent (' + chunk.length + ' chars)');
 
-    // Smart logic: Wait for the board to say TX_OK: before sending the next one!
-    await Promise.race([
-      txWaitPromise,
-      delay(3000)
-    ]);
-    
+    await Promise.race([txWaitPromise, delay(3000)]);
     resolveTxAwait = null;
   }
 
@@ -390,9 +387,42 @@ async function writeSerial(text) {
   }
 }
 
-// ─── Utility ──────────────────────────────────────────────────
-function delay(ms) {
-  return new Promise(res => setTimeout(res, ms));
+// ─── Utility helpers ──────────────────────────────────────────
+function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+function detectMime(b64) {
+  if (b64.startsWith('/9j/'))    return 'image/jpeg';
+  if (b64.startsWith('iVBORw')) return 'image/png';
+  if (b64.startsWith('R0lGOD')) return 'image/gif';
+  if (b64.startsWith('UklGR'))  return 'image/webp';
+  if (b64.startsWith('Qk'))     return 'image/bmp';
+  return 'image/bmp';
+}
+
+function base64ToBlobUrl(b64, mimeType) {
+  try {
+    const byteChars  = atob(b64);
+    const byteArrays = [];
+    for (let offset = 0; offset < byteChars.length; offset += 512) {
+      const slice = byteChars.slice(offset, offset + 512);
+      const ba    = new Uint8Array(slice.length);
+      for (let i = 0; i < slice.length; i++) ba[i] = slice.charCodeAt(i);
+      byteArrays.push(ba);
+    }
+    const blob = new Blob(byteArrays, { type: mimeType });
+    return URL.createObjectURL(blob);
+  } catch (e) {
+    // fallback to data URL if atob fails
+    return 'data:' + mimeType + ';base64,' + b64;
+  }
+}
+
+function formatFileSize(b64Len) {
+  // Approximate original byte size from base64 length
+  const bytes = Math.round(b64Len * 0.75);
+  if (bytes < 1024)       return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
 // ─── UI Helpers ───────────────────────────────────────────────
@@ -423,14 +453,14 @@ function addBubble(sender, text, direction, msgTime = null, noSave = false, msgI
   const senderEl = document.createElement('div');
   senderEl.className = 'msg-sender';
   senderEl.textContent = sender;
-  
+
   const delBtn = document.createElement('button');
   delBtn.className = 'del-btn';
   delBtn.textContent = '🗑️';
   delBtn.title = direction === 'sent' ? 'Delete for everyone' : 'Delete for me';
   delBtn.onclick = async () => {
-     deleteMessageById(msgId);
-     if (direction === 'sent') await writeSerial('CMD:DEL:' + msgId);
+    deleteMessageById(msgId);
+    if (direction === 'sent') await writeSerial('CMD:DEL:' + msgId);
   };
   senderEl.appendChild(delBtn);
 
@@ -447,13 +477,14 @@ function addBubble(sender, text, direction, msgTime = null, noSave = false, msgI
   wrapper.appendChild(time);
   chatMessages.appendChild(wrapper);
   scrollBottom();
-  
+
   if (!noSave) {
     saveChatHistory({ id: msgId, type: 'text', sender, text, direction, time: time.textContent });
   }
 }
 
-function addImageBubble(sender, filename, dataUrl, rawB64, direction, msgTime = null, noSave = false, msgId = null) {
+// ─── WhatsApp-style image bubble ─────────────────────────────
+function addImageBubble(sender, filename, blobUrl, rawB64, mimeType, direction, msgTime = null, noSave = false, msgId = null) {
   removeWelcome();
   if (!msgId) msgId = mkId();
 
@@ -461,6 +492,7 @@ function addImageBubble(sender, filename, dataUrl, rawB64, direction, msgTime = 
   wrapper.className = 'msg-wrapper ' + direction;
   wrapper.dataset.id = msgId;
 
+  // ── Sender row ─────────────────────────────────────────────
   const senderEl = document.createElement('div');
   senderEl.className = 'msg-sender';
   senderEl.textContent = sender;
@@ -470,58 +502,107 @@ function addImageBubble(sender, filename, dataUrl, rawB64, direction, msgTime = 
   delBtn.textContent = '🗑️';
   delBtn.title = direction === 'sent' ? 'Delete for everyone' : 'Delete for me';
   delBtn.onclick = async () => {
-     deleteMessageById(msgId);
-     if (direction === 'sent') await writeSerial('CMD:DEL:' + msgId);
+    deleteMessageById(msgId);
+    if (direction === 'sent') await writeSerial('CMD:DEL:' + msgId);
   };
   senderEl.appendChild(delBtn);
 
+  // ── Image card bubble ──────────────────────────────────────
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble img-bubble';
 
-  const caption = document.createElement('div');
-  caption.className = 'img-caption';
-  caption.textContent = '🖼 ' + filename;
+  // Image container (click → lightbox)
+  const imgContainer = document.createElement('div');
+  imgContainer.className = 'wa-img-container';
 
   const img = document.createElement('img');
-  img.src = dataUrl;
-  img.className = 'chat-img';
-  img.alt = filename;
-  img.title = filename;
+  img.src       = blobUrl;
+  img.className = 'wa-chat-img';
+  img.alt       = filename;
+  img.title     = 'Tap to view';
+  img.addEventListener('click', () => openLightbox(blobUrl, filename));
 
-  const downloadBtn = document.createElement('a');
-  
-  // Provide ONLY the raw base64 as a .txt file download as requested
-  const plainTextUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(rawB64);
-  downloadBtn.href = plainTextUrl;
-  
-  // Force .txt extension for the download
-  let dlName = filename;
-  if (dlName.includes('.')) {
-    dlName = dlName.substring(0, dlName.lastIndexOf('.'));
-  }
-  dlName += '_base64.txt';
-  
-  downloadBtn.download = dlName;
-  
-  downloadBtn.className = 'download-btn';
-  downloadBtn.textContent = '💾 Download Raw Base64 (.txt)';
+  // Loading spinner overlay (hides when image loads)
+  const spinner = document.createElement('div');
+  spinner.className = 'wa-img-spinner';
+  spinner.innerHTML = '<div class="spinner-ring"></div>';
+  img.addEventListener('load', () => { spinner.style.display = 'none'; });
+  img.addEventListener('error', () => { spinner.innerHTML = '⚠️'; });
 
-  bubble.appendChild(caption);
-  bubble.appendChild(img);
-  bubble.appendChild(downloadBtn);
+  imgContainer.appendChild(img);
+  imgContainer.appendChild(spinner);
 
-  const time = document.createElement('div');
+  // ── Footer row: filename + size + download ─────────────────
+  const footer = document.createElement('div');
+  footer.className = 'wa-img-footer';
+
+  const fileInfo = document.createElement('div');
+  fileInfo.className = 'wa-img-fileinfo';
+
+  const fileIcon = document.createElement('span');
+  fileIcon.className = 'wa-file-icon';
+  fileIcon.textContent = '🖼';
+
+  const fileNameEl = document.createElement('span');
+  fileNameEl.className = 'wa-file-name';
+  fileNameEl.textContent = filename;
+
+  const fileSizeEl = document.createElement('span');
+  fileSizeEl.className = 'wa-file-size';
+  fileSizeEl.textContent = rawB64 ? formatFileSize(rawB64.length) : '';
+
+  fileInfo.appendChild(fileIcon);
+  fileInfo.appendChild(fileNameEl);
+  fileInfo.appendChild(fileSizeEl);
+
+  // Download button — downloads the actual image file
+  const dlBtn = document.createElement('a');
+  dlBtn.href     = blobUrl;
+  dlBtn.download = filename;
+  dlBtn.className = 'wa-download-btn';
+  dlBtn.title    = 'Download image';
+  dlBtn.innerHTML = `<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+    <path d="M5 20h14v-2H5v2zm7-18l-7 7h4v6h6v-6h4l-7-7z" transform="rotate(180,12,12)"/>
+    <path d="M19 9h-4V3H9v6H5l7 7 7-7z"/>
+  </svg>`;
+  dlBtn.addEventListener('click', (e) => e.stopPropagation());
+
+  footer.appendChild(fileInfo);
+  footer.appendChild(dlBtn);
+
+  bubble.appendChild(imgContainer);
+  bubble.appendChild(footer);
+
+  // ── Time + tick ───────────────────────────────────────────
+  const timeRow = document.createElement('div');
+  timeRow.className = 'wa-img-time-row';
+
+  const time = document.createElement('span');
   time.className = 'msg-time';
   time.textContent = msgTime || now();
 
+  if (direction === 'sent') {
+    const tick = document.createElement('span');
+    tick.className = 'wa-tick';
+    tick.innerHTML = `<svg viewBox="0 0 16 15" width="14" height="14" fill="none">
+      <path d="M15.01 3.316l-.478-.372a.365.365 0 0 0-.51.063L8.666 9.88a.32.32 0 0 1-.484.033L5.68 7.167a.369.369 0 0 0-.525.006l-.39.422a.372.372 0 0 0 .006.525l3.33 3.065a.32.32 0 0 0 .485-.033l6.272-8.048a.366.366 0 0 0-.063-.51zm-4.134 0l-.478-.372a.365.365 0 0 0-.51.063L4.566 9.88a.32.32 0 0 1-.484.033L1.57 7.258a.369.369 0 0 0-.525.006l-.39.422a.372.372 0 0 0 .006.525l3.33 3.065a.32.32 0 0 0 .484-.033l6.273-8.048a.365.365 0 0 0-.063-.51z" fill="#53bdeb"/>
+    </svg>`;
+    timeRow.appendChild(time);
+    timeRow.appendChild(tick);
+  } else {
+    timeRow.appendChild(time);
+  }
+
+  bubble.appendChild(timeRow);
+
   wrapper.appendChild(senderEl);
   wrapper.appendChild(bubble);
-  wrapper.appendChild(time);
   chatMessages.appendChild(wrapper);
   scrollBottom();
-  
+
   if (!noSave) {
-    saveChatHistory({ id: msgId, type: 'image', sender, filename, dataUrl, rawBase64: rawB64, direction, time: time.textContent });
+    // Save base64 to localStorage for persistence (not blob URL which is session-only)
+    saveChatHistory({ id: msgId, type: 'image', sender, filename, rawBase64: rawB64, mimeType, direction, time: time.textContent });
   }
 }
 
@@ -557,18 +638,17 @@ function scrollBottom() {
 function now() {
   const d = new Date();
   return d.getHours().toString().padStart(2, '0') + ':' +
-         d.getMinutes().toString().padStart(2, '0') + ':' +
-         d.getSeconds().toString().padStart(2, '0');
+         d.getMinutes().toString().padStart(2, '0');
 }
 
 function saveChatHistory(msg) {
   chatHistory.push(msg);
-  if (chatHistory.length > 50) chatHistory.shift(); // Keep last 50
+  if (chatHistory.length > 50) chatHistory.shift();
   try {
     localStorage.setItem('lora_chat_history', JSON.stringify(chatHistory));
-  } catch(e) {
-    if(chatHistory.length > 0) {
-      chatHistory.shift(); // Evict one more
+  } catch (e) {
+    if (chatHistory.length > 0) {
+      chatHistory.shift();
       saveChatHistory(msg);
     }
   }
@@ -579,7 +659,10 @@ function loadChatHistory() {
     if (msg.type === 'text') {
       addBubble(msg.sender, msg.text, msg.direction, msg.time, true, msg.id);
     } else if (msg.type === 'image') {
-      addImageBubble(msg.sender, msg.filename, msg.dataUrl, msg.rawBase64, msg.direction, msg.time, true, msg.id);
+      // Restore image from saved base64
+      const mime    = msg.mimeType || detectMime(msg.rawBase64 || '') || 'image/bmp';
+      const blobUrl = msg.rawBase64 ? base64ToBlobUrl(msg.rawBase64, mime) : (msg.dataUrl || '');
+      addImageBubble(msg.sender, msg.filename, blobUrl, msg.rawBase64 || '', mime, msg.direction, msg.time, true, msg.id);
     }
   });
 }
@@ -604,7 +687,6 @@ clearChatBtn.addEventListener('click', () => {
   addSysMsg('🗑️ Chat cleared');
 });
 
-// Image button triggers hidden file input
 imgBtn.addEventListener('click', () => {
   if (imgBtn.disabled) return;
   imgFileInput.click();
@@ -614,7 +696,6 @@ imgFileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (file) {
     await sendImage(file);
-    // Reset so the same file can be sent again
     imgFileInput.value = '';
   }
 });
