@@ -407,24 +407,22 @@ function addImageBubble(sender, filename, dataUrl, direction) {
   img.title = filename;
 
   const downloadBtn = document.createElement('a');
-  downloadBtn.href = dataUrl;
   
-  // Convert .txt extension to the actual detected image format
+  // Provide ONLY the raw base64 as a .txt file download as requested
+  const plainTextUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(allB64);
+  downloadBtn.href = plainTextUrl;
+  
+  // Force .txt extension for the download
   let dlName = filename;
-  let ext = '.bmp';
-  if (dataUrl.includes('image/jpeg')) ext = '.jpg';
-  else if (dataUrl.includes('image/png')) ext = '.png';
-  else if (dataUrl.includes('image/gif')) ext = '.gif';
-  else if (dataUrl.includes('image/webp')) ext = '.webp';
-  
-  if (dlName.toLowerCase().endsWith('.txt') || dlName.toLowerCase().endsWith('.bmp')) {
-    dlName = dlName.substring(0, dlName.lastIndexOf('.')) + ext;
+  if (dlName.includes('.')) {
+    dlName = dlName.substring(0, dlName.lastIndexOf('.'));
   }
+  dlName += '_base64.txt';
   
   downloadBtn.download = dlName;
   
   downloadBtn.className = 'download-btn';
-  downloadBtn.textContent = '💾 Download Image';
+  downloadBtn.textContent = '💾 Download Raw Base64 (.txt)';
 
   bubble.appendChild(caption);
   bubble.appendChild(img);
