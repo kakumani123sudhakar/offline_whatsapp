@@ -206,8 +206,16 @@ function handleRxPayload(payload) {
        addSysMsg('⚠️ Image "' + fname + '" has ' + missing + ' missing chunks. The file might be corrupted.');
     }
 
+    // Auto-detect image type from base64 signature
+    let mimeType = 'image/bmp';
+    if (allB64.startsWith('/9j/')) mimeType = 'image/jpeg';
+    else if (allB64.startsWith('iVBORw')) mimeType = 'image/png';
+    else if (allB64.startsWith('R0lGOD')) mimeType = 'image/gif';
+    else if (allB64.startsWith('UklGR')) mimeType = 'image/webp';
+    else if (allB64.startsWith('Qk')) mimeType = 'image/bmp';
+
     // Convert base64 string → data URL and display in chat
-    const dataUrl = 'data:image/bmp;base64,' + allB64;
+    const dataUrl = 'data:' + mimeType + ';base64,' + allB64;
     addImageBubble('Remote', fname, dataUrl, 'received');
     delete imgRxSessions[fname];
     return;
@@ -262,8 +270,16 @@ async function sendImage(file) {
   const totalBytes = fullB64.length;
   const totalChunks = Math.ceil(totalBytes / IMG_CHUNK_RAW_BYTES);
 
+  // Auto-detect image type from base64 signature to show local preview perfectly
+  let prevMime = 'image/bmp';
+  if (fullB64.startsWith('/9j/')) prevMime = 'image/jpeg';
+  else if (fullB64.startsWith('iVBORw')) prevMime = 'image/png';
+  else if (fullB64.startsWith('R0lGOD')) prevMime = 'image/gif';
+  else if (fullB64.startsWith('UklGR')) prevMime = 'image/webp';
+  else if (fullB64.startsWith('Qk')) prevMime = 'image/bmp';
+
   // Show preview locally
-  const dataUrlPreview = 'data:image/bmp;base64,' + fullB64;
+  const dataUrlPreview = 'data:' + prevMime + ';base64,' + fullB64;
   addImageBubble('You', file.name, dataUrlPreview, 'sent');
 
   addSysMsg('📡 Transmitting "' + file.name + '" in ' + totalChunks + ' LoRa packets...');
@@ -391,11 +407,18 @@ function addImageBubble(sender, filename, dataUrl, direction) {
   const downloadBtn = document.createElement('a');
   downloadBtn.href = dataUrl;
   
-  // Convert .txt extension to .bmp so windows knows it's an image
+  // Convert .txt extension to the actual detected image format
   let dlName = filename;
-  if (dlName.toLowerCase().endsWith('.txt')) {
-    dlName = dlName.slice(0, -4) + '.bmp';
+  let ext = '.bmp';
+  if (dataUrl.includes('image/jpeg')) ext = '.jpg';
+  else if (dataUrl.includes('image/png')) ext = '.png';
+  else if (dataUrl.includes('image/gif')) ext = '.gif';
+  else if (dataUrl.includes('image/webp')) ext = '.webp';
+  
+  if (dlName.toLowerCase().endsWith('.txt') || dlName.toLowerCase().endsWith('.bmp')) {
+    dlName = dlName.substring(0, dlName.lastIndexOf('.')) + ext;
   }
+  
   downloadBtn.download = dlName;
   
   downloadBtn.className = 'download-btn';
