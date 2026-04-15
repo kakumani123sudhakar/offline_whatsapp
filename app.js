@@ -249,23 +249,25 @@ async function sendMessage(text) {
   await writeSerial(payload);
 }
 
-// ─── Send a Base64 text file over LoRa (chunked) ──────────────
+// ─── Send an Image file over LoRa (chunked) ──────────────
 async function sendImage(file) {
   if (!outputStream) return;
-  if (!file.name.toLowerCase().endsWith('.txt')) {
-    addSysMsg('⚠️ Please upload a .txt file containing the base64 image data.');
+  if (!file.type.startsWith('image/')) {
+    addSysMsg('⚠️ Please upload a valid image file (JPG, PNG, BMP, etc).');
     return;
   }
 
-  addSysMsg('📷 Reading base64 from "' + file.name + '"...');
+  addSysMsg('📷 Reading image "' + file.name + '"...');
 
-  const textData = await file.text();
+  const arrayBuf = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuf);
   
-  // Extract pure base64 if it has a data URI header
-  let fullB64 = textData.trim();
-  if (fullB64.includes('base64,')) {
-    fullB64 = fullB64.split('base64,')[1];
+  // Convert raw bytes → base64 in one go
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
   }
+  const fullB64 = btoa(binary);
 
   const totalBytes = fullB64.length;
   const totalChunks = Math.ceil(totalBytes / IMG_CHUNK_RAW_BYTES);
