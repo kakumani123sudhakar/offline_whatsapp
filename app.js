@@ -12,6 +12,8 @@ let inputDone, outputDone, inputStream;
 let txCount = 0;
 let rxCount = 0;
 
+let chatHistory = JSON.parse(localStorage.getItem('lora_chat_history') || '[]');
+
 // Resolve function for TX coordination during images
 let resolveTxAwait = null;
 
@@ -216,7 +218,7 @@ function handleRxPayload(payload) {
 
     // Convert base64 string → data URL and display in chat
     const dataUrl = 'data:' + mimeType + ';base64,' + allB64;
-    addImageBubble('Remote', fname, dataUrl, 'received');
+    addImageBubble('Remote', fname, dataUrl, allB64, 'received');
     delete imgRxSessions[fname];
     return;
   }
@@ -282,7 +284,7 @@ async function sendImage(file) {
 
   // Show preview locally
   const dataUrlPreview = 'data:' + prevMime + ';base64,' + fullB64;
-  addImageBubble('You', file.name, dataUrlPreview, 'sent');
+  addImageBubble('You', file.name, dataUrlPreview, fullB64, 'sent');
 
   addSysMsg('📡 Transmitting "' + file.name + '" in ' + totalChunks + ' LoRa packets...');
 
@@ -358,7 +360,7 @@ function removeWelcome() {
   if (w) w.remove();
 }
 
-function addBubble(sender, text, direction) {
+function addBubble(sender, text, direction, msgTime = null, noSave = false) {
   removeWelcome();
 
   const wrapper = document.createElement('div');
@@ -374,16 +376,20 @@ function addBubble(sender, text, direction) {
 
   const time = document.createElement('div');
   time.className = 'msg-time';
-  time.textContent = now();
+  time.textContent = msgTime || now();
 
   wrapper.appendChild(senderEl);
   wrapper.appendChild(bubble);
   wrapper.appendChild(time);
   chatMessages.appendChild(wrapper);
   scrollBottom();
+  
+  if (!noSave) {
+    saveChatHistory({ type: 'text', sender, text, direction, time: time.textContent });
+  }
 }
 
-function addImageBubble(sender, filename, dataUrl, direction) {
+function addImageBubble(sender, filename, dataUrl, rawB64, direction, msgTime = null, noSave = false) {
   removeWelcome();
 
   const wrapper = document.createElement('div');
@@ -409,7 +415,7 @@ function addImageBubble(sender, filename, dataUrl, direction) {
   const downloadBtn = document.createElement('a');
   
   // Provide ONLY the raw base64 as a .txt file download as requested
-  const plainTextUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(allB64);
+  const plainTextUrl = 'data:text/plain;charset=utf-8,' + encodeURIComponent(rawB64);
   downloadBtn.href = plainTextUrl;
   
   // Force .txt extension for the download
@@ -430,13 +436,17 @@ function addImageBubble(sender, filename, dataUrl, direction) {
 
   const time = document.createElement('div');
   time.className = 'msg-time';
-  time.textContent = now();
+  time.textContent = msgTime || now();
 
   wrapper.appendChild(senderEl);
   wrapper.appendChild(bubble);
   wrapper.appendChild(time);
   chatMessages.appendChild(wrapper);
   scrollBottom();
+  
+  if (!noSave) {
+    saveChatHistory({ type: 'image', sender, filename, dataUrl, rawBase64: rawB64, direction, time: time.textContent });
+  }
 }
 
 function addSysMsg(text) {
@@ -468,6 +478,29 @@ function now() {
          d.getSeconds().toString().padStart(2, '0');
 }
 
+function saveChatHistory(msg) {
+  chatHistory.push(msg);
+  if (chatHistory.length > 50) chatHistory.shift(); // Keep last 50
+  try {
+    localStorage.setItem('lora_chat_history', JSON.stringify(chatHistory));
+  } catch(e) {
+    if(chatHistory.length > 0) {
+      chatHistory.shift(); // Evict one more
+      saveChatHistory(msg);
+    }
+  }
+}
+
+function loadChatHistory() {
+  chatHistory.forEach(msg => {
+    if (msg.type === 'text') {
+      addBubble(msg.sender, msg.text, msg.direction, msg.time, true);
+    } else if (msg.type === 'image') {
+      addImageBubble(msg.sender, msg.filename, msg.dataUrl, msg.rawBase64, msg.direction, msg.time, true);
+    }
+  });
+}
+
 // ─── Event Listeners ──────────────────────────────────────────
 connectBtn.addEventListener('click', connectPort);
 disconnectBtn.addEventListener('click', disconnectPort);
@@ -483,6 +516,8 @@ msgForm.addEventListener('submit', (e) => {
 
 clearChatBtn.addEventListener('click', () => {
   chatMessages.innerHTML = '';
+  chatHistory = [];
+  localStorage.setItem('lora_chat_history', '[]');
   addSysMsg('🗑️ Chat cleared');
 });
 
@@ -500,3 +535,6 @@ imgFileInput.addEventListener('change', async (e) => {
     imgFileInput.value = '';
   }
 });
+
+// Load history on boot
+loadChatHistory();
