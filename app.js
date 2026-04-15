@@ -12,6 +12,9 @@ let inputDone, outputDone, inputStream;
 let txCount = 0;
 let rxCount = 0;
 
+// Resolve function for TX coordination during images
+let resolveTxAwait = null;
+
 // Image reassembly state (for *incoming* image packets)
 const imgRxSessions = {};  // key = filename, value = { total, chunks[] }
 
@@ -136,9 +139,18 @@ function handleIncoming(line) {
   } else if (line.startsWith('TX_OK:')) {
     txCount++;
     txCountEl.textContent = txCount;
+    // Signals the image sender that the board finished transmitting
+    if (resolveTxAwait) {
+      resolveTxAwait();
+      resolveTxAwait = null;
+    }
 
   } else if (line.startsWith('TX_ERR:')) {
     addSysMsg('⚠️ Transmit error: ' + line.slice(7));
+    if (resolveTxAwait) {
+      resolveTxAwait();
+      resolveTxAwait = null;
+    }
 
   } else if (line.startsWith('ERR:')) {
     addSysMsg('❌ Radio error code: ' + line.slice(4));
@@ -255,17 +267,27 @@ async function sendImage(file) {
     const chunk = fullB64.slice(i * IMG_CHUNK_RAW_BYTES, (i + 1) * IMG_CHUNK_RAW_BYTES);
     const pkt   = 'IMG:DATA:' + file.name + ':' + i + ':' + chunk;
 
-    // Validate fits within LoRa limit before sending
     if (pkt.length > 234) {
       addSysMsg('❌ Chunk ' + i + ' too long (' + pkt.length + ' bytes). Aborting.');
       return;
     }
 
+    // Set up a promise to wait for the exact moment the board finishes LoRa TX
+    let txWaitPromise = new Promise((resolve) => {
+      resolveTxAwait = resolve;
+    });
+
     await writeSerial(pkt);
     addDebug('→ IMG chunk ' + i + '/' + (totalChunks - 1) + ' sent (' + chunk.length + ' chars)');
 
-    // Give the board 300ms to transmit each LoRa packet (LoRa is slow!)
-    await delay(300);
+    // Smart logic: Wait for the board to say TX_OK: before sending the next one!
+    // (We also add a 3 second timeout just in case it crashes)
+    await Promise.race([
+      txWaitPromise,
+      delay(3000)
+    ]);
+    
+    resolveTxAwait = null;
   }
 
   // ── Send END ───────────────────────────────────────────────
