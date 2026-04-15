@@ -233,7 +233,17 @@ function handleRxPayload(payload) {
     const session = imgRxSessions[fname];
     if (!session) return;
 
-    const allB64 = session.chunks.join('');
+    // Fill missing chunks with empty strings to prevent undefined errors
+    for (let i = 0; i < session.total; i++) {
+       if (!session.chunks[i]) session.chunks[i] = '';
+    }
+
+    let allB64 = session.chunks.join('');
+
+    // Fix base64 padding if the length is incorrect due to dropped packets
+    while (allB64.length % 4 !== 0) {
+      allB64 += '=';
+    }
 
     let missing = 0;
     for (let i = 0; i < session.total; i++) {
