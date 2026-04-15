@@ -1,8 +1,19 @@
+// ============================================================
+//  LoRa Messenger – Web App (app.js)
+//  Fixes:
+//   • Baud-rate default raised to 115200 (matches firmware fix)
+//   • Chunked BMP image transfer  (IMG: protocol)
+//   • Image reassembly on receive with in-chat display
+// ============================================================
+
 // ─── State ───────────────────────────────────────────────────
 let port, reader, outputStream;
 let inputDone, outputDone, inputStream;
 let txCount = 0;
 let rxCount = 0;
+
+// Image reassembly state (for *incoming* image packets)
+const imgRxSessions = {};  // key = filename, value = { total, chunks[] }
 
 // ─── DOM Refs ─────────────────────────────────────────────────
 const connectBtn     = document.getElementById('connectBtn');
@@ -21,6 +32,15 @@ const myNameInput    = document.getElementById('myName');
 const rssiVal        = document.getElementById('rssiVal');
 const txCountEl      = document.getElementById('txCount');
 const rxCountEl      = document.getElementById('rxCount');
+const imgBtn         = document.getElementById('imgBtn');
+const imgFileInput   = document.getElementById('imgFileInput');
+
+// ─── Image Transfer Constants ─────────────────────────────────
+// LoRa max payload = 255 bytes
+// NETWORK_ID = 20 bytes  → 235 bytes free per packet
+// "IMG:DATA:0000:" = 14 bytes header
+// Remaining for base64 payload: 220 chars → encodes ~165 bytes binary
+const IMG_CHUNK_RAW_BYTES = 150;   // conservative – gives 200 base64 chars
 
 // ─── Browser Check ────────────────────────────────────────────
 if (!('serial' in navigator)) {
@@ -35,20 +55,16 @@ async function connectPort() {
     const baud = parseInt(baudRateSelect.value, 10);
     await port.open({ baudRate: baud });
 
-    // Setup text streams
     const encoder = new TextEncoderStream();
-    outputDone = encoder.readable.pipeTo(port.writable);
-    outputStream = encoder.writable;
+    outputDone    = encoder.readable.pipeTo(port.writable);
+    outputStream  = encoder.writable;
 
     const decoder = new TextDecoderStream();
-    inputDone = port.readable.pipeTo(decoder.writable);
-    inputStream = decoder.readable;
+    inputDone     = port.readable.pipeTo(decoder.writable);
+    inputStream   = decoder.readable;
 
-    // Update UI
     setConnected(true);
     addSysMsg('🔌 Board connected at ' + baud + ' baud');
-
-    // Start reading incoming data
     readLoop();
 
   } catch (err) {
@@ -61,7 +77,11 @@ async function disconnectPort() {
   try {
     if (reader)       await reader.cancel().catch(() => {});
     if (inputDone)    await inputDone.catch(() => {});
-    if (outputStream) { const w = outputStream.getWriter(); await w.close().catch(() => {}); w.releaseLock(); }
+    if (outputStream) {
+      const w = outputStream.getWriter();
+      await w.close().catch(() => {});
+      w.releaseLock();
+    }
     if (outputDone)   await outputDone.catch(() => {});
     if (port)         await port.close().catch(() => {});
   } catch (e) { /* ignore */ }
@@ -108,24 +128,12 @@ function handleIncoming(line) {
     contactStatus.textContent = 'LoRa P2P · 868 MHz · Listening...';
 
   } else if (line.startsWith('RX:')) {
-    // Incoming LoRa message from another board
-    const raw = line.slice(3);
+    const payload = line.slice(3);
     rxCount++;
     rxCountEl.textContent = rxCount;
-
-    // Try to parse "Name: Message" format
-    const colonIdx = raw.indexOf(':');
-    let sender = 'Remote';
-    let text = raw;
-    if (colonIdx > 0 && colonIdx < 20) {
-      sender = raw.slice(0, colonIdx).trim();
-      text   = raw.slice(colonIdx + 1).trim();
-    }
-
-    addBubble(sender, text, 'received');
+    handleRxPayload(payload);
 
   } else if (line.startsWith('TX_OK:')) {
-    // Our message was transmitted
     txCount++;
     txCountEl.textContent = txCount;
 
@@ -137,42 +145,172 @@ function handleIncoming(line) {
   }
 }
 
-// ─── Send Message ─────────────────────────────────────────────
+// ─── Handle an RX payload (text OR image protocol) ────────────
+function handleRxPayload(payload) {
+  // ── Image protocol ──────────────────────────────────────────
+  if (payload.startsWith('IMG:START:')) {
+    // IMG:START:<filename>:<totalChunks>
+    const parts  = payload.split(':');
+    // parts[0]=IMG  parts[1]=START  parts[2]=filename  parts[3]=totalChunks
+    const fname  = parts[2] || 'image.bmp';
+    const total  = parseInt(parts[3], 10);
+    imgRxSessions[fname] = { total, chunks: [] };
+    addSysMsg('📷 Receiving image "' + fname + '" (' + total + ' chunks)...');
+    return;
+  }
+
+  if (payload.startsWith('IMG:DATA:')) {
+    // IMG:DATA:<filename>:<chunkIdx>:<base64data>
+    const rest    = payload.slice('IMG:DATA:'.length);
+    const colon1  = rest.indexOf(':');
+    const colon2  = rest.indexOf(':', colon1 + 1);
+    const fname   = rest.slice(0, colon1);
+    const idx     = parseInt(rest.slice(colon1 + 1, colon2), 10);
+    const b64data = rest.slice(colon2 + 1);
+
+    if (!imgRxSessions[fname]) {
+      imgRxSessions[fname] = { total: null, chunks: [] };
+    }
+    imgRxSessions[fname].chunks[idx] = b64data;
+    addDebug('  IMG chunk ' + idx + ' received (' + b64data.length + ' chars)');
+    return;
+  }
+
+  if (payload.startsWith('IMG:END:')) {
+    // IMG:END:<filename>
+    const fname   = payload.slice('IMG:END:'.length);
+    const session = imgRxSessions[fname];
+    if (!session) return;
+
+    const allB64 = session.chunks.join('');
+    // Convert base64 string → data URL and display in chat
+    const dataUrl = 'data:image/bmp;base64,' + allB64;
+    addImageBubble('Remote', fname, dataUrl, 'received');
+    delete imgRxSessions[fname];
+    return;
+  }
+
+  // ── Regular text message ────────────────────────────────────
+  const colonIdx = payload.indexOf(':');
+  let sender = 'Remote';
+  let text   = payload;
+  if (colonIdx > 0 && colonIdx < 20) {
+    sender = payload.slice(0, colonIdx).trim();
+    text   = payload.slice(colonIdx + 1).trim();
+  }
+  addBubble(sender, text, 'received');
+}
+
+// ─── Send a text message ──────────────────────────────────────
 async function sendMessage(text) {
   if (!outputStream || !text.trim()) return;
 
-  const name = myNameInput.value.trim() || 'Me';
+  const name    = myNameInput.value.trim() || 'Me';
   const payload = name + ': ' + text.trim();
 
-  // Show in our own chat
-  addBubble('You', text.trim(), 'sent');
+  // Hard guard: LoRa packet limit (NETWORK_ID 20b + payload ≤ 255)
+  if (payload.length > 234) {
+    addSysMsg('⚠️ Message too long! Max ~220 characters.');
+    return;
+  }
 
-  // Write to serial (board will transmit via LoRa)
+  addBubble('You', text.trim(), 'sent');
+  await writeSerial(payload);
+}
+
+// ─── Send a BMP image over LoRa (chunked) ─────────────────────
+async function sendImage(file) {
+  if (!outputStream) return;
+  if (!file.name.toLowerCase().endsWith('.bmp')) {
+    addSysMsg('⚠️ Only BMP files are supported for LoRa image transfer.');
+    return;
+  }
+
+  addSysMsg('📷 Reading "' + file.name + '"...');
+
+  const arrayBuf = await file.arrayBuffer();
+  const bytes    = new Uint8Array(arrayBuf);
+
+  // Convert raw bytes → base64 in one go
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const fullB64    = btoa(binary);
+  const totalBytes = fullB64.length;
+  const totalChunks = Math.ceil(totalBytes / IMG_CHUNK_RAW_BYTES);
+
+  // Show preview locally
+  const localUrl = URL.createObjectURL(file);
+  addImageBubble('You', file.name, 'data:image/bmp;base64,' + fullB64, 'sent');
+
+  addSysMsg('📡 Transmitting "' + file.name + '" in ' + totalChunks + ' LoRa packets...');
+
+  // ── Send START ─────────────────────────────────────────────
+  await writeSerial('IMG:START:' + file.name + ':' + totalChunks);
+  await delay(200);
+
+  // ── Send DATA chunks ───────────────────────────────────────
+  for (let i = 0; i < totalChunks; i++) {
+    const chunk = fullB64.slice(i * IMG_CHUNK_RAW_BYTES, (i + 1) * IMG_CHUNK_RAW_BYTES);
+    const pkt   = 'IMG:DATA:' + file.name + ':' + i + ':' + chunk;
+
+    // Validate fits within LoRa limit before sending
+    if (pkt.length > 234) {
+      addSysMsg('❌ Chunk ' + i + ' too long (' + pkt.length + ' bytes). Aborting.');
+      return;
+    }
+
+    await writeSerial(pkt);
+    addDebug('→ IMG chunk ' + i + '/' + (totalChunks - 1) + ' sent (' + chunk.length + ' chars)');
+
+    // Give the board 300ms to transmit each LoRa packet (LoRa is slow!)
+    await delay(300);
+  }
+
+  // ── Send END ───────────────────────────────────────────────
+  await writeSerial('IMG:END:' + file.name);
+  addSysMsg('✅ Image "' + file.name + '" sent in ' + totalChunks + ' packets!');
+  URL.revokeObjectURL(localUrl);
+}
+
+// ─── Write one line to the serial port ───────────────────────
+async function writeSerial(text) {
+  if (!outputStream) return;
   try {
     const writer = outputStream.getWriter();
-    await writer.write(payload + '\n');
+    await writer.write(text + '\n');
     writer.releaseLock();
-    addDebug('→ ' + payload);
+    addDebug('→ ' + text);
   } catch (e) {
     addSysMsg('❌ Send error: ' + e.message);
   }
 }
 
+// ─── Utility ──────────────────────────────────────────────────
+function delay(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
 // ─── UI Helpers ───────────────────────────────────────────────
 function setConnected(connected) {
-  statusDot.className   = 'status-dot ' + (connected ? 'connected' : 'disconnected');
+  statusDot.className    = 'status-dot ' + (connected ? 'connected' : 'disconnected');
   statusText.textContent = connected ? 'Connected' : 'Not Connected';
   connectBtn.classList.toggle('hidden', connected);
   disconnectBtn.classList.toggle('hidden', !connected);
-  msgInput.disabled  = !connected;
-  sendBtn.disabled   = !connected;
+  msgInput.disabled = !connected;
+  sendBtn.disabled  = !connected;
+  imgBtn.disabled   = !connected;
   if (!connected) contactStatus.textContent = 'Connect your board to start';
 }
 
+function removeWelcome() {
+  const w = chatMessages.querySelector('.welcome-msg');
+  if (w) w.remove();
+}
+
 function addBubble(sender, text, direction) {
-  // Remove welcome screen on first message
-  const welcome = chatMessages.querySelector('.welcome-msg');
-  if (welcome) welcome.remove();
+  removeWelcome();
 
   const wrapper = document.createElement('div');
   wrapper.className = 'msg-wrapper ' + direction;
@@ -184,6 +322,43 @@ function addBubble(sender, text, direction) {
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
   bubble.textContent = text;
+
+  const time = document.createElement('div');
+  time.className = 'msg-time';
+  time.textContent = now();
+
+  wrapper.appendChild(senderEl);
+  wrapper.appendChild(bubble);
+  wrapper.appendChild(time);
+  chatMessages.appendChild(wrapper);
+  scrollBottom();
+}
+
+function addImageBubble(sender, filename, dataUrl, direction) {
+  removeWelcome();
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'msg-wrapper ' + direction;
+
+  const senderEl = document.createElement('div');
+  senderEl.className = 'msg-sender';
+  senderEl.textContent = sender;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble img-bubble';
+
+  const caption = document.createElement('div');
+  caption.className = 'img-caption';
+  caption.textContent = '🖼 ' + filename;
+
+  const img = document.createElement('img');
+  img.src = dataUrl;
+  img.className = 'chat-img';
+  img.alt = filename;
+  img.title = filename;
+
+  bubble.appendChild(caption);
+  bubble.appendChild(img);
 
   const time = document.createElement('div');
   time.className = 'msg-time';
@@ -209,7 +384,6 @@ function addDebug(text) {
   line.textContent = '[' + now() + '] ' + text;
   debugLog.appendChild(line);
   debugLog.scrollTop = debugLog.scrollHeight;
-  // Keep max 60 lines in debug
   while (debugLog.children.length > 60) {
     debugLog.removeChild(debugLog.firstChild);
   }
@@ -221,9 +395,9 @@ function scrollBottom() {
 
 function now() {
   const d = new Date();
-  return d.getHours().toString().padStart(2,'0') + ':' +
-         d.getMinutes().toString().padStart(2,'0') + ':' +
-         d.getSeconds().toString().padStart(2,'0');
+  return d.getHours().toString().padStart(2, '0') + ':' +
+         d.getMinutes().toString().padStart(2, '0') + ':' +
+         d.getSeconds().toString().padStart(2, '0');
 }
 
 // ─── Event Listeners ──────────────────────────────────────────
@@ -242,4 +416,19 @@ msgForm.addEventListener('submit', (e) => {
 clearChatBtn.addEventListener('click', () => {
   chatMessages.innerHTML = '';
   addSysMsg('🗑️ Chat cleared');
+});
+
+// Image button triggers hidden file input
+imgBtn.addEventListener('click', () => {
+  if (imgBtn.disabled) return;
+  imgFileInput.click();
+});
+
+imgFileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    await sendImage(file);
+    // Reset so the same file can be sent again
+    imgFileInput.value = '';
+  }
 });

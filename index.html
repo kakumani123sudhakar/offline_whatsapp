@@ -9,6 +9,33 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css"/>
+  <style>
+    /* ── Image bubbles ─────────────────────────────── */
+    .img-bubble { padding: 8px 10px; }
+    .img-caption { font-size: 0.72rem; opacity: .7; margin-bottom: 6px; }
+    .chat-img {
+      display: block;
+      max-width: 220px;
+      max-height: 220px;
+      border-radius: 8px;
+      cursor: pointer;
+      object-fit: contain;
+      background: #000;
+    }
+    /* ── Image button ──────────────────────────────── */
+    #imgBtn {
+      background: none;
+      border: none;
+      font-size: 1.35rem;
+      cursor: pointer;
+      padding: 0 6px;
+      opacity: .75;
+      transition: opacity .2s;
+      flex-shrink: 0;
+    }
+    #imgBtn:hover:not(:disabled) { opacity: 1; }
+    #imgBtn:disabled { opacity: .3; cursor: default; }
+  </style>
 </head>
 <body>
 
@@ -41,8 +68,8 @@
       <div class="field-group">
         <label>Baud Rate</label>
         <select id="baudRate">
-          <option value="9600" selected>9600</option>
-          <option value="115200">115200</option>
+          <option value="9600">9600</option>
+          <option value="115200" selected>115200</option>
         </select>
       </div>
 
@@ -100,11 +127,15 @@
 
     <!-- Input Bar -->
     <div class="chat-input-bar">
+      <!-- Hidden file input for BMP images -->
+      <input type="file" id="imgFileInput" accept=".bmp,image/bmp" style="display:none">
       <form id="msgForm">
+        <!-- 📷 Image upload button -->
+        <button type="button" id="imgBtn" title="Send BMP image via LoRa" disabled>📷</button>
         <input 
           type="text" 
           id="msgInput" 
-          placeholder="Type a message..." 
+          placeholder="Type a message... (max ~220 chars)" 
           autocomplete="off"
           disabled
         />
